@@ -51,8 +51,8 @@ tmp/
 temp/
 *.tmp
 
-# Data (large files)
-data/
+# Data (large files) - NOT src/data which is code!
+/data/
 *.tar
 *.tar.gz
 *.zip
