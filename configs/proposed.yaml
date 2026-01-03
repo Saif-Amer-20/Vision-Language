@@ -1,0 +1,119 @@
+# ============================================================================
+# PROPOSED MODEL CONFIGURATION
+# BLIP-2 + Scene Reasoning Module
+# ============================================================================
+# Usage:
+#   python scripts/train.py --config configs/proposed.yaml
+#   python scripts/train.py --config configs/proposed.yaml --smoke_test
+# ============================================================================
+
+seed: 42
+
+# Data Configuration
+data:
+  dataset_name: "HuggingFaceM4/VQAv2"
+  train_split: "train"
+  val_split: "validation"
+  max_train_samples: null
+  max_val_samples: null
+  image_size: 224
+  max_question_length: 32
+  max_answer_length: 16
+  num_workers: 2
+  pin_memory: true
+  prompt_template: "Question: {question} Answer:"
+  cache_dir: null
+
+# Model Configuration
+model:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  torch_dtype: "float16"
+  
+  # Freezing
+  freeze_vision_encoder: true
+  freeze_llm: true
+  freeze_qformer: false
+  
+  # Scene Reasoning - ENABLED for proposed model
+  use_scene_reasoning: true
+  scene_hidden_dim: 768
+  scene_num_heads: 8
+  scene_num_layers: 2
+  scene_mlp_ratio: 4.0
+  scene_dropout: 0.1
+  use_spatial_encoding: true
+  use_relation_attention: true
+  spatial_encoding_dim: 64
+  
+  # Generation
+  max_new_tokens: 16
+  num_beams: 3
+  do_sample: false
+  temperature: 1.0
+
+# Training Configuration
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 8
+  effective_batch_size: 8
+  
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  
+  num_epochs: 3
+  max_steps: null
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+  
+  fp16: true
+  bf16: false
+  gradient_checkpointing: false
+  
+  device: "auto"
+  
+  save_strategy: "epoch"
+  save_steps: 500
+  save_total_limit: 3
+  resume_from_checkpoint: null
+  
+  eval_strategy: "epoch"
+  eval_steps: 500
+  
+  early_stopping: false
+  early_stopping_patience: 3
+  
+  smoke_test: false
+  smoke_test_samples: 32
+  smoke_test_steps: 5
+
+# Logging Configuration
+logging:
+  output_dir: "./outputs"
+  experiment_name: "proposed"
+  use_tensorboard: true
+  use_wandb: false
+  wandb_project: "vlm-vqa-research"
+  wandb_entity: null
+  log_every_n_steps: 10
+  save_predictions: true
+  save_attention_maps: true  # Save scene attention for analysis
+
+# Evaluation Configuration
+evaluation:
+  compute_exact_match: true
+  compute_normalized_match: true
+  compute_vqa_accuracy: true
+  save_error_analysis: true
+  error_analysis_samples: 500
+  output_csv: true
+  output_json: true
+
+# Runtime Configuration
+runtime:
+  execution_profile: "colab_train"
+  sync_to_drive: false
+  drive_output_path: "/content/drive/MyDrive/VLM_Thesis_Outputs"
+  mac_dev_max_steps: 10
+  mac_dev_max_samples: 50
+  mac_dev_save_checkpoints: false

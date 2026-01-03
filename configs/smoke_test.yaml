@@ -1,0 +1,75 @@
+# ============================================================================
+# SMOKE TEST CONFIGURATION
+# Quick validation of the complete pipeline
+# ============================================================================
+# Usage:
+#   python scripts/train.py --config configs/smoke_test.yaml
+# ============================================================================
+
+seed: 42
+
+data:
+  dataset_name: "HuggingFaceM4/VQAv2"
+  train_split: "train"
+  val_split: "validation"
+  max_train_samples: 32
+  max_val_samples: 16
+  image_size: 224
+  max_question_length: 32
+  max_answer_length: 16
+  num_workers: 0
+  pin_memory: true
+  prompt_template: "Question: {question} Answer:"
+
+model:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  torch_dtype: "float16"
+  freeze_vision_encoder: true
+  freeze_llm: true
+  freeze_qformer: true  # Freeze everything for smoke test
+  
+  use_scene_reasoning: true
+  scene_hidden_dim: 768
+  scene_num_heads: 8
+  scene_num_layers: 1  # Minimal layers
+  
+  max_new_tokens: 8
+  num_beams: 1
+
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 2
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  
+  num_epochs: 1
+  max_steps: 5
+  warmup_ratio: 0.0
+  lr_scheduler_type: "constant"
+  
+  fp16: true
+  device: "auto"
+  
+  save_strategy: "steps"
+  save_steps: 100
+  save_total_limit: 1
+  
+  smoke_test: true
+  smoke_test_samples: 32
+  smoke_test_steps: 5
+
+logging:
+  output_dir: "./outputs"
+  experiment_name: "smoke_test"
+  use_tensorboard: false
+  use_wandb: false
+  log_every_n_steps: 1
+
+evaluation:
+  compute_exact_match: true
+  compute_normalized_match: true
+  save_error_analysis: false
+
+runtime:
+  execution_profile: "colab_train"

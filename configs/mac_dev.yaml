@@ -1,0 +1,75 @@
+# ============================================================================
+# MAC DEVELOPMENT CONFIGURATION
+# Safe configuration for local development on Mac
+# ============================================================================
+# Usage:
+#   python scripts/train.py --config configs/mac_dev.yaml
+# ============================================================================
+
+seed: 42
+
+data:
+  dataset_name: "HuggingFaceM4/VQAv2"
+  train_split: "train"
+  val_split: "validation"
+  max_train_samples: 50  # SAFETY LIMIT
+  max_val_samples: 25
+  image_size: 224
+  max_question_length: 32
+  max_answer_length: 16
+  num_workers: 0  # Safer for Mac
+  pin_memory: false
+  prompt_template: "Question: {question} Answer:"
+
+model:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  torch_dtype: "float32"  # More stable on MPS
+  freeze_vision_encoder: true
+  freeze_llm: true
+  freeze_qformer: false
+  
+  use_scene_reasoning: true
+  scene_hidden_dim: 768
+  scene_num_heads: 8
+  scene_num_layers: 2
+  
+  max_new_tokens: 16
+  num_beams: 1  # Faster for dev
+
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 2
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  
+  num_epochs: 1
+  max_steps: 10  # SAFETY LIMIT
+  warmup_ratio: 0.1
+  lr_scheduler_type: "constant"
+  
+  fp16: false  # MPS doesn't support fp16 well
+  bf16: false
+  device: "mps"  # Force MPS
+  
+  save_strategy: "steps"
+  save_steps: 100
+  save_total_limit: 1
+
+logging:
+  output_dir: "./outputs"
+  experiment_name: "mac_dev_test"
+  use_tensorboard: true
+  use_wandb: false
+  log_every_n_steps: 2
+
+evaluation:
+  compute_exact_match: true
+  compute_normalized_match: true
+  save_error_analysis: false  # Skip for dev
+
+runtime:
+  execution_profile: "mac_dev"
+  mac_dev_max_steps: 10
+  mac_dev_max_samples: 50
+  mac_dev_save_checkpoints: false

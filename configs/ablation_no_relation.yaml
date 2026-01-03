@@ -1,0 +1,70 @@
+# ============================================================================
+# ABLATION: NO RELATION ATTENTION
+# BLIP-2 + Scene Reasoning (Spatial encoding only, standard attention)
+# ============================================================================
+# Tests the contribution of relation-aware attention
+# ============================================================================
+
+seed: 42
+
+data:
+  dataset_name: "HuggingFaceM4/VQAv2"
+  train_split: "train"
+  val_split: "validation"
+  max_train_samples: null
+  max_val_samples: null
+  image_size: 224
+  max_question_length: 32
+  max_answer_length: 16
+  num_workers: 2
+  pin_memory: true
+  prompt_template: "Question: {question} Answer:"
+
+model:
+  model_name: "Salesforce/blip2-opt-2.7b"
+  torch_dtype: "float16"
+  freeze_vision_encoder: true
+  freeze_llm: true
+  freeze_qformer: false
+  
+  # Scene Reasoning with relation attention DISABLED
+  use_scene_reasoning: true
+  scene_hidden_dim: 768
+  scene_num_heads: 8
+  scene_num_layers: 2
+  scene_mlp_ratio: 4.0
+  scene_dropout: 0.1
+  use_spatial_encoding: true
+  use_relation_attention: false  # ABLATED
+  spatial_encoding_dim: 64
+  
+  max_new_tokens: 16
+  num_beams: 3
+
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 1.0e-5
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  num_epochs: 3
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+  fp16: true
+  device: "auto"
+  save_strategy: "epoch"
+  save_total_limit: 3
+
+logging:
+  output_dir: "./outputs"
+  experiment_name: "ablation_no_relation"
+  use_tensorboard: true
+  log_every_n_steps: 10
+
+evaluation:
+  compute_exact_match: true
+  compute_normalized_match: true
+  save_error_analysis: true
+
+runtime:
+  execution_profile: "colab_train"
