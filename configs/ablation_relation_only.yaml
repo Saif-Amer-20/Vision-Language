@@ -1,41 +1,40 @@
 # ============================================================================
-# ABLATION: NO RELATION ATTENTION (Spatial Encoding Only)
-# BLIP-2 + Scene Reasoning Module with Spatial Encoding but Standard Attention
+# ABLATION: RELATION ATTENTION ONLY
+# BLIP-2 + Scene Reasoning Module (Relation Attention, NO Spatial Encoding)
 # ============================================================================
-# Purpose: Test the contribution of Spatial Position Encoding alone,
-#          using standard self-attention instead of Relation-Aware Attention.
-#          This is IDENTICAL to ablation_spatial_only.yaml (kept for clarity).
+# Purpose: Isolate the contribution of Relation-Aware Self-Attention
+#          independent of the Spatial Position Encoding mechanism.
 #
 # What's ENABLED:
 #   ✓ Scene Reasoning Module (processing layers active)
-#   ✓ Spatial Position Encoding (2D row/column embeddings)
-#   ✓ Standard Self-Attention (no relative position bias)
+#   ✓ Relation-Aware Self-Attention (attention architecture)
 #
 # What's DISABLED:
-#   ✗ Relation-Aware Attention (attention without position_bias)
+#   ✗ Spatial Position Encoding (no 2D row/column embeddings)
+#   ✗ Relative Position Bias (no position_bias available for attention)
 #
-# Technical Details:
-#   - Spatial encoding adds 2D position embeddings to features
-#   - Attention operates as standard multi-head self-attention
-#   - Position bias computed but NOT used in attention scores
-#   - This isolates spatial embedding contribution from attention enhancement
+# IMPORTANT NOTE:
+#   Without spatial encoding, the Relation-Aware Attention has NO position_bias
+#   to work with. This means it operates similarly to standard self-attention
+#   but with the Relation-Aware architecture (learnable weights, layer norms).
+#   This tests whether the attention architecture itself contributes value.
 #
-# Hypothesis: Spatial encoding should provide position-awareness to features,
-#             even without injecting position bias into attention weights.
-#             Expect improvement on spatial reasoning questions.
+# Hypothesis: The Relation-Aware Attention architecture may provide some
+#             benefit even without explicit position bias, though we expect
+#             smaller gains than with spatial encoding.
 #
 # Expected Behavior:
-#   - Features receive 2D position embeddings (additive)
-#   - Standard attention (Q, K, V without bias)
-#   - Performance between baseline and proposed
-#   - Should show spatial question improvement
+#   - Features processed through relation attention layers
+#   - No 2D position information injected
+#   - Attention operates without position_bias (bias=None)
+#   - Performance likely between baseline and spatial-only
 #
-# Research Question: How much does explicit 2D position encoding
-#                    contribute independent of attention modification?
+# Research Question: Does the Relation-Aware Attention architecture
+#                    contribute independent of position information?
 #
 # Usage:
-#   python scripts/train.py --config configs/ablation_no_relation.yaml
-#   python scripts/train.py --config configs/ablation_no_relation.yaml --smoke_test
+#   python scripts/train.py --config configs/ablation_relation_only.yaml
+#   python scripts/train.py --config configs/ablation_relation_only.yaml --smoke_test
 # ============================================================================
 
 seed: 42
@@ -65,15 +64,15 @@ model:
   freeze_llm: true
   freeze_qformer: false
   
-  # Scene Reasoning - ABLATION: Spatial Only (No Relation)
+  # Scene Reasoning - ABLATION: Relation Only
   use_scene_reasoning: true
   scene_hidden_dim: 768
   scene_num_heads: 8
   scene_num_layers: 2
   scene_mlp_ratio: 4.0
   scene_dropout: 0.1
-  use_spatial_encoding: true     # ✓ ENABLED - Testing spatial contribution
-  use_relation_attention: false  # ✗ DISABLED - Standard attention
+  use_spatial_encoding: false    # ✗ DISABLED - No position embeddings
+  use_relation_attention: true   # ✓ ENABLED - Testing attention architecture
   spatial_encoding_dim: 64
   
   # Generation (identical to proposed)
@@ -121,14 +120,14 @@ training:
 # Logging Configuration
 logging:
   output_dir: "./outputs"
-  experiment_name: "ablation_no_relation"
+  experiment_name: "ablation_relation_only"
   use_tensorboard: true
   use_wandb: false
   wandb_project: "vlm-vqa-research"
   wandb_entity: null
   log_every_n_steps: 10
   save_predictions: true
-  save_attention_maps: false  # Standard attention, no special maps
+  save_attention_maps: true  # Save attention maps for analysis (no position bias)
 
 # Evaluation Configuration
 evaluation:

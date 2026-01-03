@@ -1,12 +1,46 @@
 # ============================================================================
-# ABLATION: NO SPATIAL ENCODING
-# BLIP-2 + Scene Reasoning (Relation Attention only, no spatial)
+# ABLATION: NO SPATIAL ENCODING (Minimal Scene Reasoning)
+# BLIP-2 + Scene Reasoning Module with BOTH components DISABLED
 # ============================================================================
-# Tests the contribution of spatial position encodings
+# Purpose: Test the Scene Reasoning Module architecture itself, without
+#          either spatial encoding or relation attention. This provides
+#          a fair comparison point to isolate architectural overhead.
+#
+# What's ENABLED:
+#   ✓ Scene Reasoning Module (basic MLP layers active)
+#   ✓ Standard Self-Attention (without position bias)
+#
+# What's DISABLED:
+#   ✗ Spatial Position Encoding (no 2D embeddings)
+#   ✗ Relation-Aware Attention (no position_bias in attention)
+#
+# CRITICAL FIX APPLIED:
+#   Previous version had use_relation_attention: true, which was unfair.
+#   Relation attention WITHOUT spatial encoding has no position_bias,
+#   making it essentially standard attention with extra overhead.
+#   Both must be disabled together for a fair "no enhancement" baseline.
+#
+# Hypothesis: This configuration should perform similarly to baseline,
+#             since neither spatial information nor relational reasoning
+#             is available. Any difference indicates architectural overhead.
+#
+# Expected Behavior:
+#   - Features pass through scene reasoning layers
+#   - No spatial position information
+#   - Standard attention (no relative position bias)
+#   - Performance should be close to baseline
+#
+# Research Question: Does the Scene Reasoning architecture itself
+#                    add value without its key components?
+#
+# Usage:
+#   python scripts/train.py --config configs/ablation_no_spatial.yaml
+#   python scripts/train.py --config configs/ablation_no_spatial.yaml --smoke_test
 # ============================================================================
 
 seed: 42
 
+# Data Configuration
 data:
   dataset_name: "HuggingFaceM4/VQAv2"
   train_split: "train"
@@ -19,52 +53,98 @@ data:
   num_workers: 2
   pin_memory: true
   prompt_template: "Question: {question} Answer:"
+  cache_dir: null
 
+# Model Configuration
 model:
   model_name: "Salesforce/blip2-opt-2.7b"
   torch_dtype: "float16"
+  
+  # Freezing (identical to proposed for fair comparison)
   freeze_vision_encoder: true
   freeze_llm: true
   freeze_qformer: false
   
-  # Scene Reasoning with spatial DISABLED
+  # Scene Reasoning - ABLATION: Both components disabled
   use_scene_reasoning: true
   scene_hidden_dim: 768
   scene_num_heads: 8
   scene_num_layers: 2
   scene_mlp_ratio: 4.0
   scene_dropout: 0.1
-  use_spatial_encoding: false  # ABLATED
-  use_relation_attention: true
+  use_spatial_encoding: false    # ✗ DISABLED - No position embeddings
+  use_relation_attention: false  # ✗ DISABLED - Also disabled (depends on spatial)
   spatial_encoding_dim: 64
   
+  # Generation (identical to proposed)
   max_new_tokens: 16
   num_beams: 3
+  do_sample: false
+  temperature: 1.0
 
+# Training Configuration (MUST match proposed.yaml for fair comparison)
 training:
   batch_size: 1
   gradient_accumulation_steps: 8
+  effective_batch_size: 8
+  
   learning_rate: 1.0e-5
   weight_decay: 0.01
   max_grad_norm: 1.0
+  
   num_epochs: 3
+  max_steps: null
   warmup_ratio: 0.1
   lr_scheduler_type: "cosine"
+  
   fp16: true
+  bf16: false
+  gradient_checkpointing: false
+  
   device: "auto"
+  
   save_strategy: "epoch"
+  save_steps: 500
   save_total_limit: 3
+  resume_from_checkpoint: null
+  
+  eval_strategy: "epoch"
+  eval_steps: 500
+  
+  early_stopping: false
+  early_stopping_patience: 3
+  
+  smoke_test: false
+  smoke_test_samples: 32
+  smoke_test_steps: 5
 
+# Logging Configuration
 logging:
   output_dir: "./outputs"
   experiment_name: "ablation_no_spatial"
   use_tensorboard: true
+  use_wandb: false
+  wandb_project: "vlm-vqa-research"
+  wandb_entity: null
   log_every_n_steps: 10
+  save_predictions: true
+  save_attention_maps: false  # No meaningful attention to save
 
+# Evaluation Configuration
 evaluation:
   compute_exact_match: true
   compute_normalized_match: true
+  compute_vqa_accuracy: true
   save_error_analysis: true
+  error_analysis_samples: 500
+  output_csv: true
+  output_json: true
 
+# Runtime Configuration
 runtime:
   execution_profile: "colab_train"
+  sync_to_drive: false
+  drive_output_path: "/content/drive/MyDrive/VLM_Thesis_Outputs"
+  mac_dev_max_steps: 10
+  mac_dev_max_samples: 50
+  mac_dev_save_checkpoints: false
