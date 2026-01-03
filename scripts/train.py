@@ -40,11 +40,12 @@ from src.utils.config import (
     load_config,
     ExperimentConfig,
     ExecutionProfile,
+    parse_cli_overrides,
 )
 from src.utils.seed import set_seed
 from src.utils.io_utils import save_json, ensure_dir
 from src.utils.logging_utils import ExperimentLogger
-from src.data.vqa_dataset import create_dataloaders
+from src.data.vqa_dataset import create_dataloaders, VQADatasetConfig
 from src.models.blip2_wrapper import create_model
 from src.training.trainer import VQATrainer
 from src.evaluation.evaluator import VQAEvaluator
@@ -191,31 +192,28 @@ def main():
     # Parse arguments
     args = parse_args()
     
-    # Load configuration
+    # Parse CLI overrides (dot-notation like --training.learning_rate 2e-5)
+    overrides = args.overrides if hasattr(args, 'overrides') else {}
+    
+    # Determine execution profile
+    profile_str = args.execution_profile if args.execution_profile else None
+    
+    # Load configuration with all options
     print(f"📋 Loading config from: {args.config}")
-    config = load_config(args.config, overrides=args.overrides)
+    config = load_config(
+        config_path=args.config,
+        overrides=overrides,
+        execution_profile=profile_str,
+        smoke_test=args.smoke_test,
+        apply_constraints=True,
+        validate=True,
+    )
     
-    # Handle execution profile
-    if args.execution_profile:
-        profile = ExecutionProfile(args.execution_profile)
-    elif hasattr(config, "runtime") and config.runtime.execution_profile:
-        profile = ExecutionProfile(config.runtime.execution_profile)
-    else:
-        profile = detect_execution_profile()
-    
+    # Get the effective profile
+    profile = config.runtime.get_profile()
     print(f"🔧 Execution profile: {profile.value}")
     
-    # Apply smoke test settings
-    if args.smoke_test or config.training.smoke_test:
-        print("🚀 Smoke test mode enabled")
-        config.training.max_steps = config.training.smoke_test_steps
-        config.data.max_train_samples = config.training.smoke_test_samples
-        config.data.max_val_samples = config.training.smoke_test_samples // 2
-    
-    # Apply profile limits
-    config = apply_profile_limits(config, profile)
-    
-    # Resume checkpoint
+    # Resume checkpoint override
     if args.resume:
         config.training.resume_from_checkpoint = args.resume
     

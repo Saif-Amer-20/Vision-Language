@@ -32,10 +32,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import torch
 
-from src.utils.config import load_config
+from src.utils.config import load_config, ExperimentConfig
 from src.utils.seed import set_seed
 from src.utils.io_utils import load_checkpoint, save_json, ensure_dir
-from src.data.vqa_dataset import create_dataloaders
+from src.data.vqa_dataset import create_dataloaders, VQADatasetConfig
 from src.models.blip2_wrapper import create_model
 from src.evaluation.evaluator import VQAEvaluator
 from src.evaluation.error_analysis import ErrorAnalyzer

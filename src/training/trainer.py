@@ -39,6 +39,8 @@ class VQATrainer:
         val_loader: DataLoader,
         config,
         logger=None,
+        output_dir: Optional[Path] = None,
+        device: Optional[str] = None,
     ):
         """
         Initialize trainer.
@@ -47,11 +49,14 @@ class VQATrainer:
             model: VQA model
             train_loader: Training dataloader
             val_loader: Validation dataloader
-            config: Configuration object
+            config: ExperimentConfig object
             logger: Experiment logger
+            output_dir: Optional override for output directory
+            device: Optional override for device (used with Accelerate)
         """
         self.config = config
         self.logger = logger
+        self.best_checkpoint_path = None
         
         # Setup accelerator
         self.accelerator = self._setup_accelerator()
@@ -76,8 +81,11 @@ class VQATrainer:
         self.epoch = 0
         self.best_metric = float('inf')
         
-        # Output directory
-        self.output_dir = Path(config.logging.output_dir) / config.logging.experiment_name
+        # Output directory (use override if provided)
+        if output_dir is not None:
+            self.output_dir = Path(output_dir)
+        else:
+            self.output_dir = Path(config.logging.output_dir) / config.logging.experiment_name
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Save config
