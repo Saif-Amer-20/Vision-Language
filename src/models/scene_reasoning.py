@@ -81,27 +81,48 @@ class SpatialPositionEncoding(nn.Module):
         """
         Compute absolute 2D position encodings.
         
+        Handles CLS token by checking if num_patches is a perfect square.
+        If not (e.g., 257 = 256 + 1), assumes first token is CLS and
+        assigns it a special position encoding.
+        
         Args:
             batch_size: Batch size
-            num_patches: Total patches
+            num_patches: Total patches (may include CLS token)
             device: Device
             
         Returns:
             Position encodings [B, num_patches, hidden_dim]
         """
-        grid_size = int(math.sqrt(num_patches))
+        # Check for CLS token
+        has_cls = False
+        grid_patches = num_patches
+        sqrt_check = int(math.sqrt(num_patches))
+        
+        if sqrt_check * sqrt_check != num_patches:
+            # Not a perfect square - likely has CLS token
+            has_cls = True
+            grid_patches = num_patches - 1
+            sqrt_check = int(math.sqrt(grid_patches))
+            
+            if sqrt_check * sqrt_check != grid_patches:
+                # Still not a perfect square, fall back to nearest
+                sqrt_check = int(math.sqrt(grid_patches) + 0.5)
+                grid_patches = sqrt_check * sqrt_check
+        
+        grid_size = sqrt_check
         
         # Create position indices
-        rows = torch.arange(grid_size, device=device)
-        cols = torch.arange(grid_size, device=device)
+        rows = torch.arange(min(grid_size, self.max_positions), device=device)
+        cols = torch.arange(min(grid_size, self.max_positions), device=device)
         
         # Get embeddings
         row_emb = self.row_embed(rows)  # [grid_size, spatial_dim/2]
         col_emb = self.col_embed(cols)  # [grid_size, spatial_dim/2]
         
         # Create 2D grid of embeddings
-        row_emb = row_emb.unsqueeze(1).expand(-1, grid_size, -1)  # [H, W, D/2]
-        col_emb = col_emb.unsqueeze(0).expand(grid_size, -1, -1)  # [H, W, D/2]
+        actual_grid = min(grid_size, self.max_positions)
+        row_emb = row_emb.unsqueeze(1).expand(-1, actual_grid, -1)  # [H, W, D/2]
+        col_emb = col_emb.unsqueeze(0).expand(actual_grid, -1, -1)  # [H, W, D/2]
         
         # Concatenate and flatten
         pos_emb = torch.cat([row_emb, col_emb], dim=-1)  # [H, W, D]
@@ -109,6 +130,21 @@ class SpatialPositionEncoding(nn.Module):
         
         # Project to hidden dimension
         pos_emb = self.position_proj(pos_emb)  # [H*W, hidden_dim]
+        
+        # Handle CLS token - prepend a learned CLS position encoding
+        if has_cls:
+            # Create CLS position encoding (zeros or learned)
+            cls_pos = torch.zeros(1, self.hidden_dim, device=device, dtype=pos_emb.dtype)
+            pos_emb = torch.cat([cls_pos, pos_emb], dim=0)  # [1 + H*W, hidden_dim]
+        
+        # Ensure we have exactly num_patches
+        if pos_emb.size(0) < num_patches:
+            # Pad with zeros if needed
+            pad = torch.zeros(num_patches - pos_emb.size(0), self.hidden_dim, device=device, dtype=pos_emb.dtype)
+            pos_emb = torch.cat([pos_emb, pad], dim=0)
+        elif pos_emb.size(0) > num_patches:
+            # Truncate if needed
+            pos_emb = pos_emb[:num_patches]
         
         # Expand for batch
         pos_emb = pos_emb.unsqueeze(0).expand(batch_size, -1, -1)
@@ -119,13 +155,27 @@ class SpatialPositionEncoding(nn.Module):
         """
         Get relative position bias matrix for attention.
         
+        Handles CLS token by computing bias for grid patches and 
+        padding for the CLS token.
+        
         Args:
-            num_patches: Total patches
+            num_patches: Total patches (may include CLS token)
             
         Returns:
             Bias matrix [num_patches, num_patches]
         """
-        grid_size = int(math.sqrt(num_patches))
+        # Check for CLS token
+        has_cls = False
+        grid_patches = num_patches
+        sqrt_check = int(math.sqrt(num_patches))
+        
+        if sqrt_check * sqrt_check != num_patches:
+            has_cls = True
+            grid_patches = num_patches - 1
+            sqrt_check = int(math.sqrt(grid_patches))
+        
+        grid_size = min(sqrt_check, self.max_positions)
+        actual_patches = grid_size * grid_size
         
         # Create coordinate grids
         coords = torch.stack(torch.meshgrid(
@@ -150,7 +200,22 @@ class SpatialPositionEncoding(nn.Module):
         # Gather bias values
         bias = self.relative_position_bias.view(-1)[
             relative_position_index.view(-1)
-        ].view(num_patches, num_patches)
+        ].view(actual_patches, actual_patches)
+        
+        # Handle CLS token - extend bias matrix
+        if has_cls or actual_patches < num_patches:
+            # Create full bias matrix with zeros for CLS
+            full_bias = torch.zeros(
+                num_patches, num_patches, 
+                device=self.relative_position_bias.device,
+                dtype=self.relative_position_bias.dtype
+            )
+            # Fill in the grid-to-grid bias (skip CLS token at position 0)
+            start_idx = 1 if has_cls else 0
+            end_idx = start_idx + actual_patches
+            if end_idx <= num_patches:
+                full_bias[start_idx:end_idx, start_idx:end_idx] = bias
+            bias = full_bias
         
         return bias
     
