@@ -45,6 +45,13 @@ class SpatialPositionEncoding(nn.Module):
     2D Spatial Position Encoding for image patches.
     
     Creates learnable relative position encodings based on 2D spatial relationships.
+    Handles both square and non-square grids, as well as CLS tokens.
+    
+    Common patch configurations:
+    - ViT-B/16 224x224: 14x14 = 196 patches (+1 CLS = 197)
+    - ViT-B/16 384x384: 24x24 = 576 patches (+1 CLS = 577)  
+    - ViT-L/14 224x224: 16x16 = 256 patches (+1 CLS = 257)
+    - BLIP-2 Q-Former: 32 query tokens (not spatial)
     """
     
     def __init__(
@@ -63,6 +70,10 @@ class SpatialPositionEncoding(nn.Module):
         self.row_embed = nn.Embedding(max_positions, spatial_dim // 2)
         self.col_embed = nn.Embedding(max_positions, spatial_dim // 2)
         
+        # Learnable CLS token position encoding
+        self.cls_pos_embed = nn.Parameter(torch.zeros(1, hidden_dim))
+        nn.init.trunc_normal_(self.cls_pos_embed, std=0.02)
+        
         # Project to hidden dimension
         self.position_proj = nn.Linear(spatial_dim, hidden_dim)
         
@@ -71,6 +82,44 @@ class SpatialPositionEncoding(nn.Module):
             torch.zeros(2 * max_positions - 1, 2 * max_positions - 1)
         )
         nn.init.trunc_normal_(self.relative_position_bias, std=0.02)
+    
+    def _parse_grid_size(self, num_patches: int) -> Tuple[bool, int, int]:
+        """
+        Parse grid size from number of patches, handling CLS token.
+        
+        Args:
+            num_patches: Total number of patches (may include CLS token)
+            
+        Returns:
+            Tuple of (has_cls, grid_height, grid_width)
+        """
+        # Common configurations: check for perfect squares first
+        sqrt_val = int(math.sqrt(num_patches))
+        
+        if sqrt_val * sqrt_val == num_patches:
+            # Perfect square, no CLS token
+            return False, sqrt_val, sqrt_val
+        
+        # Try num_patches - 1 for CLS token
+        grid_patches = num_patches - 1
+        sqrt_val = int(math.sqrt(grid_patches))
+        
+        if sqrt_val * sqrt_val == grid_patches:
+            # Perfect square after removing CLS
+            return True, sqrt_val, sqrt_val
+        
+        # Non-square grid: find best factorization
+        # Try common aspect ratios
+        for h in range(int(math.sqrt(grid_patches)) + 1, 0, -1):
+            if grid_patches % h == 0:
+                w = grid_patches // h
+                if h <= self.max_positions and w <= self.max_positions:
+                    return True, h, w
+        
+        # Fallback: use nearest square
+        sqrt_approx = int(math.sqrt(grid_patches) + 0.5)
+        sqrt_approx = min(sqrt_approx, self.max_positions)
+        return True, sqrt_approx, sqrt_approx
     
     def get_absolute_positions(
         self,
@@ -81,9 +130,8 @@ class SpatialPositionEncoding(nn.Module):
         """
         Compute absolute 2D position encodings.
         
-        Handles CLS token by checking if num_patches is a perfect square.
-        If not (e.g., 257 = 256 + 1), assumes first token is CLS and
-        assigns it a special position encoding.
+        Handles CLS token and non-square grids. Uses learnable CLS position
+        encoding for special tokens.
         
         Args:
             batch_size: Batch size
@@ -93,54 +141,44 @@ class SpatialPositionEncoding(nn.Module):
         Returns:
             Position encodings [B, num_patches, hidden_dim]
         """
-        # Check for CLS token
-        has_cls = False
-        grid_patches = num_patches
-        sqrt_check = int(math.sqrt(num_patches))
+        # Parse grid configuration
+        has_cls, grid_h, grid_w = self._parse_grid_size(num_patches)
         
-        if sqrt_check * sqrt_check != num_patches:
-            # Not a perfect square - likely has CLS token
-            has_cls = True
-            grid_patches = num_patches - 1
-            sqrt_check = int(math.sqrt(grid_patches))
-            
-            if sqrt_check * sqrt_check != grid_patches:
-                # Still not a perfect square, fall back to nearest
-                sqrt_check = int(math.sqrt(grid_patches) + 0.5)
-                grid_patches = sqrt_check * sqrt_check
-        
-        grid_size = sqrt_check
+        # Clamp to max positions
+        grid_h = min(grid_h, self.max_positions)
+        grid_w = min(grid_w, self.max_positions)
         
         # Create position indices
-        rows = torch.arange(min(grid_size, self.max_positions), device=device)
-        cols = torch.arange(min(grid_size, self.max_positions), device=device)
+        rows = torch.arange(grid_h, device=device)
+        cols = torch.arange(grid_w, device=device)
         
         # Get embeddings
-        row_emb = self.row_embed(rows)  # [grid_size, spatial_dim/2]
-        col_emb = self.col_embed(cols)  # [grid_size, spatial_dim/2]
+        row_emb = self.row_embed(rows)  # [H, spatial_dim/2]
+        col_emb = self.col_embed(cols)  # [W, spatial_dim/2]
         
         # Create 2D grid of embeddings
-        actual_grid = min(grid_size, self.max_positions)
-        row_emb = row_emb.unsqueeze(1).expand(-1, actual_grid, -1)  # [H, W, D/2]
-        col_emb = col_emb.unsqueeze(0).expand(actual_grid, -1, -1)  # [H, W, D/2]
+        row_emb = row_emb.unsqueeze(1).expand(-1, grid_w, -1)  # [H, W, D/2]
+        col_emb = col_emb.unsqueeze(0).expand(grid_h, -1, -1)  # [H, W, D/2]
         
         # Concatenate and flatten
         pos_emb = torch.cat([row_emb, col_emb], dim=-1)  # [H, W, D]
-        pos_emb = pos_emb.view(-1, self.spatial_dim)     # [H*W, D]
+        pos_emb = pos_emb.reshape(-1, self.spatial_dim)  # [H*W, D]
         
         # Project to hidden dimension
         pos_emb = self.position_proj(pos_emb)  # [H*W, hidden_dim]
         
-        # Handle CLS token - prepend a learned CLS position encoding
+        # Handle CLS token - prepend learned CLS position encoding
         if has_cls:
-            # Create CLS position encoding (zeros or learned)
-            cls_pos = torch.zeros(1, self.hidden_dim, device=device, dtype=pos_emb.dtype)
+            cls_pos = self.cls_pos_embed.to(device=device, dtype=pos_emb.dtype)
             pos_emb = torch.cat([cls_pos, pos_emb], dim=0)  # [1 + H*W, hidden_dim]
         
         # Ensure we have exactly num_patches
         if pos_emb.size(0) < num_patches:
-            # Pad with zeros if needed
-            pad = torch.zeros(num_patches - pos_emb.size(0), self.hidden_dim, device=device, dtype=pos_emb.dtype)
+            # Pad with zeros if needed (for edge cases)
+            pad = torch.zeros(
+                num_patches - pos_emb.size(0), self.hidden_dim, 
+                device=device, dtype=pos_emb.dtype
+            )
             pos_emb = torch.cat([pos_emb, pad], dim=0)
         elif pos_emb.size(0) > num_patches:
             # Truncate if needed
@@ -155,8 +193,8 @@ class SpatialPositionEncoding(nn.Module):
         """
         Get relative position bias matrix for attention.
         
-        Handles CLS token by computing bias for grid patches and 
-        padding for the CLS token.
+        Handles CLS token and non-square grids by computing bias for 
+        grid patches and padding for the CLS token.
         
         Args:
             num_patches: Total patches (may include CLS token)
@@ -164,23 +202,18 @@ class SpatialPositionEncoding(nn.Module):
         Returns:
             Bias matrix [num_patches, num_patches]
         """
-        # Check for CLS token
-        has_cls = False
-        grid_patches = num_patches
-        sqrt_check = int(math.sqrt(num_patches))
+        # Parse grid configuration
+        has_cls, grid_h, grid_w = self._parse_grid_size(num_patches)
         
-        if sqrt_check * sqrt_check != num_patches:
-            has_cls = True
-            grid_patches = num_patches - 1
-            sqrt_check = int(math.sqrt(grid_patches))
+        # Clamp to max positions
+        grid_h = min(grid_h, self.max_positions)
+        grid_w = min(grid_w, self.max_positions)
+        actual_patches = grid_h * grid_w
         
-        grid_size = min(sqrt_check, self.max_positions)
-        actual_patches = grid_size * grid_size
-        
-        # Create coordinate grids
+        # Create coordinate grids (handle non-square)
         coords = torch.stack(torch.meshgrid(
-            torch.arange(grid_size),
-            torch.arange(grid_size),
+            torch.arange(grid_h),
+            torch.arange(grid_w),
             indexing='ij'
         ))  # [2, H, W]
         coords = coords.flatten(1)  # [2, H*W]

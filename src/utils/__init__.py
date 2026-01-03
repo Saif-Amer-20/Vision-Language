@@ -17,6 +17,7 @@ from .config import (
 from .seed import set_seed, get_worker_init_fn
 from .io_utils import save_checkpoint, load_checkpoint, save_json, load_json, ensure_dir
 from .logging_utils import ExperimentLogger, format_metrics
+from .device_utils import DeviceManager, DeviceInfo, get_device_manager, NullContext
 
 __all__ = [
     # Config classes
@@ -45,4 +46,9 @@ __all__ = [
     # Logging
     "ExperimentLogger",
     "format_metrics",
+    # Device
+    "DeviceManager",
+    "DeviceInfo",
+    "get_device_manager",
+    "NullContext",
 ]

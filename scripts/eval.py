@@ -38,7 +38,8 @@ from src.utils.io_utils import load_checkpoint, save_json, ensure_dir
 from src.data.vqa_dataset import create_dataloaders, VQADatasetConfig
 from src.models.blip2_wrapper import create_model
 from src.evaluation.evaluator import VQAEvaluator
-from src.evaluation.error_analysis import ErrorAnalyzer
+from src.evaluation.error_analysis import ErrorAnalyzer, analyze_predictions_file
+from src.evaluation.visualizations import plot_error_analysis
 
 
 def parse_args() -> argparse.Namespace:
@@ -220,7 +221,7 @@ def main():
     # Error analysis
     if args.error_analysis or config.evaluation.save_error_analysis:
         print("\n" + "=" * 60)
-        print("🔍 Generating Error Analysis...")
+        print("🔍 Generating Comprehensive Error Analysis...")
         print("=" * 60)
         
         # Load predictions
@@ -228,27 +229,82 @@ def main():
         if predictions_path.exists():
             import json
             with open(predictions_path) as f:
-                predictions = json.load(f)
+                predictions_data = json.load(f)
+            
+            # Prepare prediction records for analyzer
+            # Handle both list format and dict format from evaluator
+            if isinstance(predictions_data, dict):
+                # Extract from evaluator output format
+                preds = predictions_data.get('predictions', [])
+                gts = predictions_data.get('ground_truths', [])
+                questions = predictions_data.get('questions', [])
+                qids = predictions_data.get('question_ids', [])
+                qtypes = predictions_data.get('question_types', [])
+                iids = predictions_data.get('image_ids', [])
+                
+                prediction_records = []
+                for i in range(len(preds)):
+                    record = {
+                        'prediction': preds[i] if i < len(preds) else '',
+                        'ground_truths': gts[i] if i < len(gts) else [],
+                        'question': questions[i] if i < len(questions) else '',
+                        'question_id': qids[i] if i < len(qids) else str(i),
+                        'question_type': qtypes[i] if i < len(qtypes) else None,
+                        'image_id': iids[i] if i < len(iids) else None,
+                    }
+                    prediction_records.append(record)
+            else:
+                prediction_records = predictions_data
+            
+            # Get max samples from config
+            max_samples = getattr(config.evaluation, 'error_analysis_samples', 500)
             
             # Create analyzer
             analyzer = ErrorAnalyzer(
-                predictions=predictions,
-                max_samples=config.evaluation.error_analysis_samples,
+                predictions=prediction_records,
+                max_samples=max_samples,
             )
             
-            # Generate report
-            report = analyzer.generate_report()
+            # Run analysis
+            print("   Analyzing predictions...")
+            analysis_result = analyzer.analyze()
             
-            # Save report
-            report_path = output_dir / "error_analysis.md"
-            with open(report_path, "w") as f:
-                f.write(report)
+            # Save all outputs
+            print("   Saving analysis files...")
+            saved_files = analyzer.save_analysis(output_dir)
             
-            print(f"   Error analysis saved to: {report_path}")
+            print(f"   ✅ Markdown report: {saved_files.get('report', 'N/A')}")
+            print(f"   ✅ JSON analysis: {saved_files.get('json', 'N/A')}")
+            print(f"   ✅ Top errors CSV: {saved_files.get('csv', 'N/A')}")
             
-            # Save detailed analysis
-            analysis = analyzer.analyze()
-            save_json(analysis, output_dir / "error_analysis.json")
+            # Generate visualizations
+            print("\n   Generating visualizations...")
+            try:
+                plot_paths = plot_error_analysis(
+                    analysis=analysis_result,
+                    output_dir=output_dir,
+                )
+                for name, path in plot_paths.items():
+                    print(f"   ✅ {name}: {path}")
+            except Exception as e:
+                print(f"   ⚠️ Visualization generation failed: {e}")
+                print("      (Install matplotlib and seaborn for plots)")
+            
+            # Print summary
+            print("\n   📊 Error Analysis Summary:")
+            print(f"      Total samples: {analysis_result.total_samples}")
+            print(f"      Correct: {analysis_result.correct_count} ({analysis_result.overall_accuracy*100:.1f}%)")
+            print(f"      Close misses: {analysis_result.close_miss_count}")
+            print(f"      VQA Accuracy: {analysis_result.overall_vqa_accuracy*100:.2f}%")
+            
+            if analysis_result.error_types:
+                print("\n   📉 Error Types:")
+                for etype, count in analysis_result.error_types.items():
+                    pct = analysis_result.error_type_percentages.get(etype, 0)
+                    print(f"      {etype}: {count} ({pct:.1f}%)")
+        else:
+            print(f"   ⚠️ Predictions file not found: {predictions_path}")
+            print("      Run evaluation with save_predictions=True first.")
     
     print("\n" + "=" * 60)
     print("✅ Evaluation Complete!")

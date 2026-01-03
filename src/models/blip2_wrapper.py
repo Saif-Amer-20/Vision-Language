@@ -40,7 +40,6 @@ class BLIP2VQAModel(nn.Module):
         freeze_llm: bool = True,
         freeze_qformer: bool = False,
         torch_dtype: str = "float16",
-        device_map: str = "auto",
         scene_reasoning_module: Optional[nn.Module] = None,
         max_new_tokens: int = 16,
         num_beams: int = 3,
@@ -54,10 +53,12 @@ class BLIP2VQAModel(nn.Module):
             freeze_llm: Freeze language model
             freeze_qformer: Freeze Q-Former
             torch_dtype: Model precision (float16, bfloat16, float32)
-            device_map: Device mapping
             scene_reasoning_module: Optional scene reasoning module
             max_new_tokens: Max tokens for generation
             num_beams: Beam search width
+            
+        NOTE: Device placement is handled externally by DeviceManager.
+        Do NOT use device_map="auto" as it conflicts with .to(device).
         """
         super().__init__()
         
@@ -75,11 +76,12 @@ class BLIP2VQAModel(nn.Module):
         
         print(f"🔄 Loading BLIP-2: {model_name}")
         
-        # Load model
+        # Load model - use low_cpu_mem_usage for efficient loading
+        # Device placement handled by DeviceManager.prepare_model()
         self.model = Blip2ForConditionalGeneration.from_pretrained(
             model_name,
-            device_map=device_map,
             torch_dtype=self.dtype,
+            low_cpu_mem_usage=True,
         )
         
         # Load processor

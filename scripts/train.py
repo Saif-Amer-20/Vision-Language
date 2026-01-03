@@ -45,6 +45,7 @@ from src.utils.config import (
 from src.utils.seed import set_seed
 from src.utils.io_utils import save_json, ensure_dir
 from src.utils.logging_utils import ExperimentLogger
+from src.utils.device_utils import DeviceManager, get_device_manager
 from src.data.vqa_dataset import create_dataloaders, VQADatasetConfig
 from src.models.blip2_wrapper import create_model
 from src.training.trainer import VQATrainer
@@ -228,18 +229,13 @@ def main():
     # Save config
     save_json(config.to_dict(), dirs["experiment"] / "config.json")
     
-    # Detect device
-    if config.training.device == "auto":
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
-    else:
-        device = config.training.device
+    # Initialize DeviceManager for unified device placement
+    # This replaces manual device detection and model.to(device)
+    device_manager = get_device_manager(config, log_info=True)
+    device = device_manager.device
     
-    print(f"💻 Device: {device}")
+    # Log device info to experiment config
+    save_json(device_manager.get_info_dict(), dirs["experiment"] / "device_info.json")
     
     # Initialize logger
     logger = ExperimentLogger(
@@ -265,9 +261,15 @@ def main():
     print("🤖 Loading Model...")
     print("=" * 60)
     
-    # Create model
-    model = create_model(config.model)
-    model = model.to(device)
+    # Create model - loaded on CPU initially
+    model = create_model(config)
+    
+    # Use DeviceManager for proper device placement
+    # This avoids the device_map="auto" conflict with .to(device)
+    model = device_manager.prepare_model(model)
+    
+    # Print memory estimate
+    device_manager.print_memory_estimate(model, config.training.per_device_train_batch_size)
     
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
