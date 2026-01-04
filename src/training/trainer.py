@@ -61,11 +61,15 @@ class VQATrainer:
         # Setup accelerator
         self.accelerator = self._setup_accelerator()
         
+        # Store loaders temporarily for scheduler setup
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        
         # Setup optimizer and scheduler
         self.optimizer = self._setup_optimizer(model)
         self.scheduler = self._setup_scheduler()
         
-        # Prepare with accelerator
+        # Prepare with accelerator (overwrites loaders with prepared versions)
         (
             self.model,
             self.optimizer,
